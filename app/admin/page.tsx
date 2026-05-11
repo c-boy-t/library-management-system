@@ -24,6 +24,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -36,28 +38,29 @@ import {
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { 
-  BookOpen, 
-  Users, 
-  BarChart3, 
-  Settings, 
+import { Toaster } from "@/components/ui/toaster"
+import { useToast } from "@/hooks/use-toast"
+import {
+  BookOpen,
+  Users,
+  BarChart3,
+  Settings,
   Search,
   Plus,
   MoreHorizontal,
-  TrendingUp,
-  BookCopy,
-  UserCheck,
   AlertTriangle,
   LogOut,
-  Menu,
   ImagePlus,
   BookMarked,
   Home,
   FolderTree,
   Clock,
   Bell,
-  FileText
+  FileText,
+  KeyRound,
+  Ban,
+  RotateCcw,
+  Eye,
 } from "lucide-react"
 
 const stats = [
@@ -89,17 +92,137 @@ const books = [
   { id: 5, isbn: "9787020002207", title: "三体", author: "刘慈欣", category: "文学", stock: 7, total: 12 },
 ]
 
-const users = [
-  { id: 1, name: "张三", email: "zhangsan@school.edu.cn", studentId: "2024001234", borrows: 3, status: "active" },
-  { id: 2, name: "李四", email: "lisi@school.edu.cn", studentId: "2024001235", borrows: 2, status: "active" },
-  { id: 3, name: "王五", email: "wangwu@school.edu.cn", studentId: "2024001236", borrows: 0, status: "active" },
-  { id: 4, name: "赵六", email: "zhaoliu@school.edu.cn", studentId: "2024001237", borrows: 5, status: "locked" },
+type UserStatus = "激活" | "禁用"
+type UserRole = "admin" | "user"
+
+type LibraryUser = {
+  id: number
+  username: string
+  realName: string
+  address: string
+  gender: "男" | "女"
+  phone: string
+  email: string
+  role: UserRole
+  status: UserStatus
+  lastOperatedAt: string
+  lockedUntil: string
+}
+
+const initialUsers: LibraryUser[] = [
+  {
+    id: 1,
+    username: "zhangsan",
+    realName: "张三",
+    address: "北京市海淀区中关村大街 1 号",
+    gender: "男",
+    phone: "13800138000",
+    email: "zhangsan@school.edu.cn",
+    role: "admin",
+    status: "激活",
+    lastOperatedAt: "2024-05-10 14:30:55",
+    lockedUntil: "-",
+  },
+  {
+    id: 2,
+    username: "lisi",
+    realName: "李四",
+    address: "上海市浦东新区世纪大道 88 号",
+    gender: "女",
+    phone: "13912345678",
+    email: "lisi@school.edu.cn",
+    role: "user",
+    status: "禁用",
+    lastOperatedAt: "2024-05-09 09:18:21",
+    lockedUntil: "2024-06-01 09:00:00",
+  },
+  {
+    id: 3,
+    username: "wangwu",
+    realName: "王五",
+    address: "广东省广州市天河区体育西路 66 号",
+    gender: "男",
+    phone: "13798765432",
+    email: "wangwu@school.edu.cn",
+    role: "user",
+    status: "激活",
+    lastOperatedAt: "2024-05-08 16:42:10",
+    lockedUntil: "-",
+  },
+  {
+    id: 4,
+    username: "zhaoliu",
+    realName: "赵六",
+    address: "浙江省杭州市西湖区文三路 199 号",
+    gender: "女",
+    phone: "13666668888",
+    email: "zhaoliu@school.edu.cn",
+    role: "admin",
+    status: "禁用",
+    lastOperatedAt: "2024-05-07 11:05:33",
+    lockedUntil: "2024-05-31 18:30:00",
+  },
+  {
+    id: 5,
+    username: "sunqi",
+    realName: "孙琪",
+    address: "四川省成都市武侯区人民南路 4 段",
+    gender: "女",
+    phone: "13588889999",
+    email: "sunqi@school.edu.cn",
+    role: "user",
+    status: "激活",
+    lastOperatedAt: "2024-05-06 20:15:48",
+    lockedUntil: "-",
+  },
 ]
 
 export default function AdminPage() {
-  const [activeNav, setActiveNav] = useState("dashboard")
+  const [activeNav, setActiveNav] = useState("users")
   const [showAddBookModal, setShowAddBookModal] = useState(false)
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
+  const [userRows, setUserRows] = useState<LibraryUser[]>(initialUsers)
+  const [nameInput, setNameInput] = useState("")
+  const [statusInput, setStatusInput] = useState<UserStatus | "">("")
+  const [filters, setFilters] = useState<{ name: string; status: UserStatus | "" }>({
+    name: "",
+    status: "",
+  })
+  const [detailUser, setDetailUser] = useState<LibraryUser | null>(null)
+  const [passwordUser, setPasswordUser] = useState<LibraryUser | null>(null)
+  const { toast } = useToast()
+
+  const filteredUsers = userRows.filter((user) => {
+    const matchesName = filters.name.trim()
+      ? user.realName.includes(filters.name.trim()) || user.username.includes(filters.name.trim())
+      : true
+    const matchesStatus = filters.status ? user.status === filters.status : true
+
+    return matchesName && matchesStatus
+  })
+
+  const handleUserSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setFilters({
+      name: nameInput.trim(),
+      status: statusInput,
+    })
+  }
+
+  const handleToggleStatus = (userId: number) => {
+    setUserRows((currentUsers) =>
+      currentUsers.map((user) =>
+        user.id === userId
+          ? {
+              ...user,
+              status: user.status === "激活" ? "禁用" : "激活",
+              lockedUntil: user.status === "激活" ? "2024-06-30 23:59:59" : "-",
+            }
+          : user,
+      ),
+    )
+    toast({ title: "操作成功" })
+  }
 
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -134,54 +257,48 @@ export default function AdminPage() {
           <nav className="flex-1 p-4 space-y-1">
             <button
               onClick={() => setActiveNav("dashboard")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "dashboard" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "dashboard" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <Home className="h-4 w-4" />
               仪表盘
             </button>
             <button
               onClick={() => setActiveNav("books")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "books" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "books" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <BookOpen className="h-4 w-4" />
               图书管理
             </button>
             <button
               onClick={() => setActiveNav("categories")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "categories" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "categories" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <FolderTree className="h-4 w-4" />
               分类管理
             </button>
             <button
               onClick={() => setActiveNav("borrows")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "borrows" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "borrows" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <BookMarked className="h-4 w-4" />
               借阅管理
             </button>
             <button
               onClick={() => setActiveNav("users")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "users" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "users" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <Users className="h-4 w-4" />
               用户管理
             </button>
             <button
               onClick={() => setActiveNav("overdue")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "overdue" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "overdue" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <Clock className="h-4 w-4" />
               逾期管理
@@ -189,18 +306,16 @@ export default function AdminPage() {
             </button>
             <button
               onClick={() => setActiveNav("reports")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "reports" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "reports" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <BarChart3 className="h-4 w-4" />
               统计报表
             </button>
             <button
               onClick={() => setActiveNav("settings")}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                activeNav === "settings" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeNav === "settings" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                }`}
             >
               <Settings className="h-4 w-4" />
               系统设置
@@ -417,67 +532,158 @@ export default function AdminPage() {
 
           {activeNav === "users" && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="relative w-64">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input placeholder="搜索用户..." className="pl-10 bg-card" />
-                </div>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  新增用户
-                </Button>
-              </div>
+              <Card className="bg-card">
+                <CardHeader>
+                  <CardTitle className="text-lg">条件搜索</CardTitle>
+                  <CardDescription>按真实姓名模糊匹配用户，并可限定账号状态。</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form
+                    onSubmit={handleUserSearch}
+                    className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(220px,1fr)_220px_auto]"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="user-name-search">姓名</Label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="user-name-search"
+                          value={nameInput}
+                          onChange={(event) => setNameInput(event.target.value)}
+                          placeholder="请输入用户姓名"
+                          className="pl-10 bg-secondary"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>状态</Label>
+                      <Select
+                        value={statusInput}
+                        onValueChange={(value) => setStatusInput(value as UserStatus)}
+                      >
+                        <SelectTrigger className="w-full bg-secondary">
+                          <SelectValue placeholder="请选择状态" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="激活">激活</SelectItem>
+                          <SelectItem value="禁用">禁用</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <Button type="submit" className="w-full md:w-auto">
+                        <Search className="mr-2 h-4 w-4" />
+                        搜索
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label="重置搜索"
+                        onClick={() => {
+                          setNameInput("")
+                          setStatusInput("")
+                          setFilters({ name: "", status: "" })
+                        }}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
 
               <Card className="bg-card">
-                <Table>
+                <Table className="table-auto">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>用户</TableHead>
-                      <TableHead>学号</TableHead>
-                      <TableHead>邮箱</TableHead>
-                      <TableHead>当前借阅</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead className="w-[80px]">操作</TableHead>
+                      <TableHead className="min-w-[180px]">用户信息</TableHead>
+                      <TableHead className="min-w-[140px]">联系方式</TableHead>
+                      <TableHead className="min-w-[100px]">角色</TableHead>
+                      <TableHead className="min-w-[110px]">账号状态</TableHead>
+                      <TableHead className="min-w-[180px]">最后操作时间</TableHead>
+                      <TableHead className="min-w-[260px] text-right">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
+                    {filteredUsers.map((user) => (
                       <TableRow key={user.id}>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Avatar className="h-8 w-8">
                               <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                                {user.name[0]}
+                                {user.realName[0]}
                               </AvatarFallback>
                             </Avatar>
-                            <span className="font-medium">{user.name}</span>
+                            <div>
+                              <p className="font-medium">{user.username}</p>
+                              <p className="text-xs text-muted-foreground">{user.realName}</p>
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono text-sm">{user.studentId}</TableCell>
-                        <TableCell>{user.email}</TableCell>
-                        <TableCell>{user.borrows}/5</TableCell>
+                        <TableCell className="font-mono text-sm">{user.phone}</TableCell>
                         <TableCell>
-                          <Badge variant={user.status === "active" ? "default" : "destructive"}>
-                            {user.status === "active" ? "正常" : "锁定"}
-                          </Badge>
+                          <span
+                            className={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${
+                              user.role === "admin"
+                                ? "bg-purple-500/15 text-purple-300"
+                                : "bg-blue-500/15 text-blue-300"
+                            }`}
+                          >
+                            {user.role}
+                          </span>
                         </TableCell>
                         <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-<DropdownMenuContent align="end">
-                                              <DropdownMenuItem>重置密码</DropdownMenuItem>
-                                              <DropdownMenuItem>
-                                                {user.status === "active" ? "禁用账户" : "启用账户"}
-                                              </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <span
+                            className="inline-flex rounded-md px-2.5 py-1 text-xs font-medium text-white"
+                            style={{ backgroundColor: user.status === "激活" ? "#52c41a" : "#ff4d4f" }}
+                          >
+                            {user.status}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm text-muted-foreground">
+                          {user.lastOperatedAt}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => setDetailUser(user)}
+                            >
+                              <Eye className="mr-1.5 h-3.5 w-3.5" />
+                              详情
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => setPasswordUser(user)}
+                            >
+                              <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                              重置
+                            </Button>
+                            <Button
+                              variant={user.status === "激活" ? "destructive" : "secondary"}
+                              size="sm"
+                              className="h-8"
+                              onClick={() => handleToggleStatus(user.id)}
+                            >
+                              <Ban className="mr-1.5 h-3.5 w-3.5" />
+                              {user.status === "激活" ? "禁用" : "启用"}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
+                    {filteredUsers.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
+                          暂无匹配用户
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </Card>
@@ -516,15 +722,15 @@ export default function AdminPage() {
             <div className="space-y-2">
               <Label>图书封面</Label>
               <div className="flex items-start gap-4">
-                <label 
+                <label
                   htmlFor="cover-upload"
                   className="relative flex-shrink-0 w-32 h-44 rounded-lg border-2 border-dashed border-border bg-secondary/50 hover:bg-secondary hover:border-primary/50 transition-all cursor-pointer overflow-hidden group"
                 >
                   {coverPreview ? (
                     <>
-                      <img 
-                        src={coverPreview} 
-                        alt="封面预览" 
+                      <img
+                        src={coverPreview}
+                        alt="封面预览"
                         className="w-full h-full object-cover"
                       />
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -562,7 +768,7 @@ export default function AdminPage() {
                   className="bg-secondary border-border"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="bookTitle">书名</Label>
                 <Input
@@ -571,7 +777,7 @@ export default function AdminPage() {
                   className="bg-secondary border-border"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="author">作者</Label>
                 <Input
@@ -580,7 +786,7 @@ export default function AdminPage() {
                   className="bg-secondary border-border"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="publisher">出版社</Label>
                 <Input
@@ -589,7 +795,7 @@ export default function AdminPage() {
                   className="bg-secondary border-border"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="category">分类</Label>
                 <Select>
@@ -604,7 +810,7 @@ export default function AdminPage() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="publishYear">出版年份</Label>
                 <Input
@@ -616,7 +822,7 @@ export default function AdminPage() {
                   className="bg-secondary border-border"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="stock">总库存</Label>
                 <Input
@@ -640,9 +846,9 @@ export default function AdminPage() {
             </div>
 
             <div className="flex gap-3 pt-4">
-              <Button 
-                type="button" 
-                variant="secondary" 
+              <Button
+                type="button"
+                variant="secondary"
                 className="flex-1"
                 onClick={() => {
                   setShowAddBookModal(false)
@@ -658,6 +864,116 @@ export default function AdminPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={Boolean(detailUser)} onOpenChange={(open) => !open && setDetailUser(null)}>
+        <DialogContent className="bg-card border-border sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>用户详情</DialogTitle>
+            <DialogDescription>
+              {detailUser ? `${detailUser.realName} 的账号档案` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {detailUser && (
+            <form className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="detail-username">用户名</Label>
+                <Input id="detail-username" value={detailUser.username} readOnly className="bg-secondary" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-real-name">真实姓名</Label>
+                <Input id="detail-real-name" value={detailUser.realName} readOnly className="bg-secondary" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-gender">性别</Label>
+                <Input id="detail-gender" value={detailUser.gender} readOnly className="bg-secondary" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-phone">手机号</Label>
+                <Input id="detail-phone" value={detailUser.phone} readOnly className="bg-secondary font-mono" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-role">role</Label>
+                <Input id="detail-role" value={detailUser.role} readOnly className="bg-secondary font-mono" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-status">账号状态</Label>
+                <Input id="detail-status" value={detailUser.status} readOnly className="bg-secondary" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-email">邮箱</Label>
+                <Input id="detail-email" value={detailUser.email} readOnly className="bg-secondary" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="detail-locked-until">locked_until</Label>
+                <Input
+                  id="detail-locked-until"
+                  value={detailUser.lockedUntil}
+                  readOnly
+                  className="bg-secondary font-mono"
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="detail-address">地址</Label>
+                <Input id="detail-address" value={detailUser.address} readOnly className="bg-secondary" />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="detail-last-operated-at">最后操作时间</Label>
+                <Input
+                  id="detail-last-operated-at"
+                  value={detailUser.lastOperatedAt}
+                  readOnly
+                  className="bg-secondary font-mono"
+                />
+              </div>
+              <DialogFooter className="sm:col-span-2">
+                <Button type="button" onClick={() => setDetailUser(null)}>
+                  关闭
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(passwordUser)} onOpenChange={(open) => !open && setPasswordUser(null)}>
+        <DialogContent className="bg-card border-border sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>重置密码</DialogTitle>
+            <DialogDescription>
+              {passwordUser ? `${passwordUser.realName}（${passwordUser.username}）` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              setPasswordUser(null)
+              toast({ title: "操作成功" })
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="old-password">旧密码</Label>
+              <Input id="old-password" type="password" placeholder="请输入旧密码" className="bg-secondary" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-password">新密码</Label>
+              <Input id="new-password" type="password" placeholder="请输入新密码" className="bg-secondary" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">确认新密码</Label>
+              <Input id="confirm-password" type="password" placeholder="请再次输入新密码" className="bg-secondary" />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setPasswordUser(null)}>
+                取消
+              </Button>
+              <Button type="submit">确认重置</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Toaster />
     </div>
   )
 }
