@@ -103,16 +103,6 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            {/* 手机验证码登录按钮 */}
-            <Button 
-              variant="secondary" 
-              className="w-full h-11"
-              onClick={() => setShowPhoneModal(true)}
-            >
-              <Smartphone className="mr-2 h-4 w-4" />
-              手机验证码登录
-            </Button>
-
             {/* 分割线 */}
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -122,6 +112,16 @@ export default function LoginPage() {
                 <span className="bg-card px-3 text-muted-foreground">其他登录方式</span>
               </div>
             </div>
+
+            {/* 手机验证码登录按钮 */}
+            <Button 
+              variant="secondary" 
+              className="w-full h-11"
+              onClick={() => setShowPhoneModal(true)}
+            >
+              <Smartphone className="mr-2 h-4 w-4" />
+              手机验证码登录
+            </Button>
 
             {/* 微信登录按钮 */}
             <Button 
