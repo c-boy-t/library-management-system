@@ -3,6 +3,8 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 
 import type { AuthUser } from '@/lib/auth'
 
+const AUTH_STORAGE_KEY = 'library-auth'
+
 export interface AuthSession {
   token: string
   tokenType: string
@@ -50,16 +52,18 @@ export const useAuthStore = create<AuthState>()(
           expiresAt: session.expiresAt,
           user: session.user,
         }),
-      clearSession: () =>
+      clearSession: () => {
         set({
           token: null,
           tokenType: null,
           expiresAt: null,
           user: null,
-        }),
+        })
+        void safeStorage.removeItem(AUTH_STORAGE_KEY)
+      },
     }),
     {
-      name: 'library-auth',
+      name: AUTH_STORAGE_KEY,
       storage: safeStorage,
       partialize: (state) => ({
         token: state.token,
