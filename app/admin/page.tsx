@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -36,9 +37,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
+import { ApiError } from "@/lib/api"
+import {
+  fetchAdminUsers,
+  resetAdminUserPassword,
+  updateAdminUserStatus,
+  type AdminUser,
+  type AdminUserPage,
+} from "@/lib/admin-users"
+import { logError } from "@/lib/logger"
+import { useAuthStore } from "@/store/auth-store"
 import {
   BookOpen,
   Users,
@@ -91,137 +110,210 @@ const books = [
   { id: 5, isbn: "9787020002207", title: "三体", author: "刘慈欣", category: "文学", stock: 7, total: 12 },
 ]
 
-type UserStatus = "激活" | "禁用"
-type UserRole = "admin" | "user"
+type UserStatusFilter = "all" | "1" | "0"
 
-type LibraryUser = {
-  id: number
-  username: string
-  realName: string
-  address: string
-  gender: "男" | "女"
-  phone: string
-  email: string
-  role: UserRole
-  status: UserStatus
-  lastOperatedAt: string
-  lockedUntil: string
+const emptyUserPage: AdminUserPage = {
+  total: 0,
+  pages: 0,
+  pageNum: 1,
+  pageSize: 10,
+  list: [],
 }
 
-const initialUsers: LibraryUser[] = [
-  {
-    id: 1,
-    username: "zhangsan",
-    realName: "张三",
-    address: "北京市海淀区中关村大街 1 号",
-    gender: "男",
-    phone: "13800138000",
-    email: "zhangsan@school.edu.cn",
-    role: "admin",
-    status: "激活",
-    lastOperatedAt: "2024-05-10 14:30:55",
-    lockedUntil: "-",
-  },
-  {
-    id: 2,
-    username: "lisi",
-    realName: "李四",
-    address: "上海市浦东新区世纪大道 88 号",
-    gender: "女",
-    phone: "13912345678",
-    email: "lisi@school.edu.cn",
-    role: "user",
-    status: "禁用",
-    lastOperatedAt: "2024-05-09 09:18:21",
-    lockedUntil: "2024-06-01 09:00:00",
-  },
-  {
-    id: 3,
-    username: "wangwu",
-    realName: "王五",
-    address: "广东省广州市天河区体育西路 66 号",
-    gender: "男",
-    phone: "13798765432",
-    email: "wangwu@school.edu.cn",
-    role: "user",
-    status: "激活",
-    lastOperatedAt: "2024-05-08 16:42:10",
-    lockedUntil: "-",
-  },
-  {
-    id: 4,
-    username: "zhaoliu",
-    realName: "赵六",
-    address: "浙江省杭州市西湖区文三路 199 号",
-    gender: "女",
-    phone: "13666668888",
-    email: "zhaoliu@school.edu.cn",
-    role: "admin",
-    status: "禁用",
-    lastOperatedAt: "2024-05-07 11:05:33",
-    lockedUntil: "2024-05-31 18:30:00",
-  },
-  {
-    id: 5,
-    username: "sunqi",
-    realName: "孙琪",
-    address: "四川省成都市武侯区人民南路 4 段",
-    gender: "女",
-    phone: "13588889999",
-    email: "sunqi@school.edu.cn",
-    role: "user",
-    status: "激活",
-    lastOperatedAt: "2024-05-06 20:15:48",
-    lockedUntil: "-",
-  },
-]
+function getErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.message
+  }
+
+  return "用户数据加载失败，请稍后重试"
+}
+
+function formatDateTime(date?: string | null) {
+  if (!date) {
+    return "-"
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(date))
+}
+
+function getUserStatusLabel(status: number) {
+  return status === 1 ? "激活" : "禁用"
+}
+
+function getGenderLabel(gender?: number | null) {
+  if (gender === 0) {
+    return "女"
+  }
+  if (gender === 1) {
+    return "男"
+  }
+  return "-"
+}
+
+function getVisiblePages(currentPage: number, totalPages: number) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1)
+  }
+
+  const start = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
+  return Array.from({ length: 5 }, (_, index) => start + index)
+}
 
 export default function AdminPage() {
+  const router = useRouter()
   const [activeNav, setActiveNav] = useState("users")
   const [showAddBookModal, setShowAddBookModal] = useState(false)
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
-  const [userRows, setUserRows] = useState<LibraryUser[]>(initialUsers)
   const [nameInput, setNameInput] = useState("")
-  const [statusInput, setStatusInput] = useState<UserStatus | "">("")
-  const [filters, setFilters] = useState<{ name: string; status: UserStatus | "" }>({
-    name: "",
-    status: "",
+  const [statusInput, setStatusInput] = useState<UserStatusFilter>("all")
+  const [userQuery, setUserQuery] = useState<{ realName: string; status: UserStatusFilter }>({
+    realName: "",
+    status: "all",
   })
-  const [detailUser, setDetailUser] = useState<LibraryUser | null>(null)
-  const [passwordUser, setPasswordUser] = useState<LibraryUser | null>(null)
+  const [userPage, setUserPage] = useState<AdminUserPage>(emptyUserPage)
+  const [userLoading, setUserLoading] = useState(false)
+  const [userError, setUserError] = useState("")
+  const [pageSize] = useState(5)
+  const [detailUser, setDetailUser] = useState<AdminUser | null>(null)
+  const [passwordUser, setPasswordUser] = useState<AdminUser | null>(null)
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [actionUserId, setActionUserId] = useState<number | null>(null)
+  const token = useAuthStore((state) => state.token)
+  const hydrated = useAuthStore((state) => state.hydrated)
   const { toast } = useToast()
 
-  const filteredUsers = userRows.filter((user) => {
-    const matchesName = filters.name.trim()
-      ? user.realName.includes(filters.name.trim()) || user.username.includes(filters.name.trim())
-      : true
-    const matchesStatus = filters.status ? user.status === filters.status : true
+  const loadUsers = useCallback(async (
+    page = 1,
+    query = userQuery,
+  ) => {
+    if (!token) {
+      return
+    }
 
-    return matchesName && matchesStatus
-  })
+    setUserLoading(true)
+    setUserError("")
+    try {
+      const nextPage = await fetchAdminUsers(token, {
+        page,
+        size: pageSize,
+        realName: query.realName,
+        status: query.status === "all" ? undefined : Number(query.status),
+      })
+      setUserPage(nextPage)
+    } catch (error) {
+      logError("admin.users.load", error)
+      setUserPage(emptyUserPage)
+      setUserError(getErrorMessage(error))
+    } finally {
+      setUserLoading(false)
+    }
+  }, [pageSize, token, userQuery])
 
   const handleUserSearch = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setFilters({
-      name: nameInput.trim(),
+    const nextQuery = {
+      realName: nameInput.trim(),
       status: statusInput,
-    })
+    }
+    setUserQuery(nextQuery)
+    void loadUsers(1, nextQuery)
   }
 
-  const handleToggleStatus = (userId: number) => {
-    setUserRows((currentUsers) =>
-      currentUsers.map((user) =>
-        user.id === userId
-          ? {
-              ...user,
-              status: user.status === "激活" ? "禁用" : "激活",
-              lockedUntil: user.status === "激活" ? "2024-06-30 23:59:59" : "-",
-            }
-          : user,
-      ),
-    )
-    toast({ title: "操作成功" })
+  const handleResetUserSearch = () => {
+    const nextQuery = { realName: "", status: "all" as const }
+    setNameInput("")
+    setStatusInput("all")
+    setUserQuery(nextQuery)
+    void loadUsers(1, nextQuery)
   }
+
+  const handleUserPageChange = (page: number) => {
+    if (page < 1 || (userPage.pages > 0 && page > userPage.pages) || page === userPage.pageNum) {
+      return
+    }
+
+    void loadUsers(page)
+  }
+
+  const handleToggleStatus = async (user: AdminUser) => {
+    if (!token) {
+      router.replace("/login")
+      return
+    }
+
+    const nextStatus = user.status === 1 ? 0 : 1
+    setActionUserId(user.userId)
+    try {
+      const updated = await updateAdminUserStatus(token, user.userId, nextStatus)
+      setUserPage((currentPage) => ({
+        ...currentPage,
+        list: currentPage.list.map((item) => (item.userId === updated.userId ? updated : item)),
+      }))
+      setDetailUser((currentUser) => (currentUser?.userId === updated.userId ? updated : currentUser))
+      toast({ title: "操作成功" })
+    } catch (error) {
+      logError("admin.users.status", error)
+      toast({
+        title: "操作失败",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      })
+    } finally {
+      setActionUserId(null)
+    }
+  }
+
+  const handleResetPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!token || !passwordUser) {
+      return
+    }
+
+    setActionUserId(passwordUser.userId)
+    try {
+      await resetAdminUserPassword(token, passwordUser.userId, {
+        newPassword,
+        confirmPassword,
+      })
+      setPasswordUser(null)
+      setNewPassword("")
+      setConfirmPassword("")
+      toast({ title: "操作成功" })
+    } catch (error) {
+      logError("admin.users.reset-password", error)
+      toast({
+        title: "重置失败",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      })
+    } finally {
+      setActionUserId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!hydrated && !token) {
+      return
+    }
+
+    if (!token) {
+      router.replace("/login")
+      return
+    }
+
+    if (activeNav === "users") {
+      void loadUsers(1)
+    }
+  }, [activeNav, hydrated, loadUsers, router, token])
 
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -233,6 +325,8 @@ export default function AdminPage() {
       reader.readAsDataURL(file)
     }
   }
+
+  const visibleUserPages = getVisiblePages(userPage.pageNum, userPage.pages)
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -539,7 +633,7 @@ export default function AdminPage() {
                 <CardContent>
                   <form
                     onSubmit={handleUserSearch}
-                    className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(220px,1fr)_220px_auto]"
+                    className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,1fr)_280px_auto]"
                   >
                     <div className="space-y-2">
                       <Label htmlFor="user-name-search">姓名</Label>
@@ -558,14 +652,15 @@ export default function AdminPage() {
                       <Label>状态</Label>
                       <Select
                         value={statusInput}
-                        onValueChange={(value) => setStatusInput(value as UserStatus)}
+                        onValueChange={(value) => setStatusInput(value as UserStatusFilter)}
                       >
                         <SelectTrigger className="w-full bg-secondary">
                           <SelectValue placeholder="请选择状态" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="激活">激活</SelectItem>
-                          <SelectItem value="禁用">禁用</SelectItem>
+                          <SelectItem value="all">全部状态</SelectItem>
+                          <SelectItem value="1">激活</SelectItem>
+                          <SelectItem value="0">禁用</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -579,11 +674,7 @@ export default function AdminPage() {
                         variant="outline"
                         size="icon"
                         aria-label="重置搜索"
-                        onClick={() => {
-                          setNameInput("")
-                          setStatusInput("")
-                          setFilters({ name: "", status: "" })
-                        }}
+                        onClick={handleResetUserSearch}
                       >
                         <RotateCcw className="h-4 w-4" />
                       </Button>
@@ -593,98 +684,244 @@ export default function AdminPage() {
               </Card>
 
               <Card className="bg-card">
-                <Table className="table-auto">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[180px]">用户信息</TableHead>
-                      <TableHead className="min-w-[140px]">联系方式</TableHead>
-                      <TableHead className="min-w-[100px]">角色</TableHead>
-                      <TableHead className="min-w-[110px]">账号状态</TableHead>
-                      <TableHead className="min-w-[180px]">最后操作时间</TableHead>
-                      <TableHead className="min-w-[260px] text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredUsers.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-8 w-8">
-                              <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                                {user.realName[0]}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">{user.username}</p>
-                              <p className="text-xs text-muted-foreground">{user.realName}</p>
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle className="text-lg">用户信息</CardTitle>
+                    <CardDescription>
+                      共 {userPage.total} 位用户，当前第 {userPage.pageNum || 1} / {Math.max(userPage.pages, 1)} 页
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {userError && (
+                    <div className="border-t border-border p-8 text-center text-sm text-destructive">
+                      {userError}
+                    </div>
+                  )}
+
+                  {!userError && (
+                    <>
+                      <div className="hidden overflow-x-auto lg:block">
+                        <Table className="table-auto">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="min-w-[180px]">用户信息</TableHead>
+                              <TableHead className="min-w-[180px]">联系方式</TableHead>
+                              <TableHead className="min-w-[100px]">角色</TableHead>
+                              <TableHead className="min-w-[110px]">账号状态</TableHead>
+                              <TableHead className="min-w-[180px]">最后操作时间</TableHead>
+                              <TableHead className="min-w-[260px] text-right">操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {userPage.list.map((user) => (
+                              <TableRow key={user.userId}>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Avatar className="h-8 w-8">
+                                      <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                        {(user.realName || user.username).slice(0, 1)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <div>
+                                      <p className="font-medium">{user.username}</p>
+                                      <p className="text-xs text-muted-foreground">{user.realName || "-"}</p>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <p className="font-mono text-sm">{user.phone || "-"}</p>
+                                  <p className="text-xs text-muted-foreground">{user.email || "-"}</p>
+                                </TableCell>
+                                <TableCell>
+                                  <span
+                                    className={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${user.role === "admin"
+                                      ? "bg-purple-500/15 text-purple-300"
+                                      : "bg-blue-500/15 text-blue-300"
+                                      }`}
+                                  >
+                                    {user.role || "-"}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <span
+                                    className="inline-flex rounded-md px-2.5 py-1 text-xs font-medium text-white"
+                                    style={{ backgroundColor: user.status === 1 ? "#52c41a" : "#ff4d4f" }}
+                                  >
+                                    {getUserStatusLabel(user.status)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="font-mono text-sm text-muted-foreground">
+                                  {formatDateTime(user.lastOperationTime)}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex justify-end gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8"
+                                      onClick={() => setDetailUser(user)}
+                                    >
+                                      <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                      详情
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8"
+                                      onClick={() => {
+                                        setPasswordUser(user)
+                                        setNewPassword("")
+                                        setConfirmPassword("")
+                                      }}
+                                    >
+                                      <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                                      重置
+                                    </Button>
+                                    <Button
+                                      variant={user.status === 1 ? "destructive" : "secondary"}
+                                      size="sm"
+                                      className="h-8"
+                                      disabled={actionUserId === user.userId}
+                                      onClick={() => {
+                                        void handleToggleStatus(user)
+                                      }}
+                                    >
+                                      <Ban className="mr-1.5 h-3.5 w-3.5" />
+                                      {user.status === 1 ? "禁用" : "启用"}
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            {!userLoading && userPage.list.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
+                                  暂无匹配用户
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      <div className="space-y-3 border-t border-border p-4 lg:hidden">
+                        {userPage.list.map((user) => (
+                          <div key={user.userId} className="rounded-lg bg-secondary/50 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-9 w-9">
+                                  <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                    {(user.realName || user.username).slice(0, 1)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-medium">{user.username}</p>
+                                  <p className="text-xs text-muted-foreground">{user.realName || "-"}</p>
+                                </div>
+                              </div>
+                              <span
+                                className="inline-flex rounded-md px-2.5 py-1 text-xs font-medium text-white"
+                                style={{ backgroundColor: user.status === 1 ? "#52c41a" : "#ff4d4f" }}
+                              >
+                                {getUserStatusLabel(user.status)}
+                              </span>
+                            </div>
+                            <div className="mt-4 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                              <span>电话：{user.phone || "-"}</span>
+                              <span>角色：{user.role || "-"}</span>
+                              <span className="sm:col-span-2">最后操作：{formatDateTime(user.lastOperationTime)}</span>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <Button variant="outline" size="sm" onClick={() => setDetailUser(user)}>
+                                <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                详情
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setPasswordUser(user)
+                                  setNewPassword("")
+                                  setConfirmPassword("")
+                                }}
+                              >
+                                <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                                重置
+                              </Button>
+                              <Button
+                                variant={user.status === 1 ? "destructive" : "secondary"}
+                                size="sm"
+                                disabled={actionUserId === user.userId}
+                                onClick={() => {
+                                  void handleToggleStatus(user)
+                                }}
+                              >
+                                <Ban className="mr-1.5 h-3.5 w-3.5" />
+                                {user.status === 1 ? "禁用" : "启用"}
+                              </Button>
                             </div>
                           </div>
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{user.phone}</TableCell>
-                        <TableCell>
-                          <span
-                            className={`inline-flex rounded-md px-2.5 py-1 text-xs font-medium ${
-                              user.role === "admin"
-                                ? "bg-purple-500/15 text-purple-300"
-                                : "bg-blue-500/15 text-blue-300"
-                            }`}
-                          >
-                            {user.role}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className="inline-flex rounded-md px-2.5 py-1 text-xs font-medium text-white"
-                            style={{ backgroundColor: user.status === "激活" ? "#52c41a" : "#ff4d4f" }}
-                          >
-                            {user.status}
-                          </span>
-                        </TableCell>
-                        <TableCell className="font-mono text-sm text-muted-foreground">
-                          {user.lastOperatedAt}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8"
-                              onClick={() => setDetailUser(user)}
-                            >
-                              <Eye className="mr-1.5 h-3.5 w-3.5" />
-                              详情
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8"
-                              onClick={() => setPasswordUser(user)}
-                            >
-                              <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-                              重置
-                            </Button>
-                            <Button
-                              variant={user.status === "激活" ? "destructive" : "secondary"}
-                              size="sm"
-                              className="h-8"
-                              onClick={() => handleToggleStatus(user.id)}
-                            >
-                              <Ban className="mr-1.5 h-3.5 w-3.5" />
-                              {user.status === "激活" ? "禁用" : "启用"}
-                            </Button>
+                        ))}
+                        {!userLoading && userPage.list.length === 0 && (
+                          <div className="rounded-lg bg-secondary/40 p-8 text-center text-sm text-muted-foreground">
+                            暂无匹配用户
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {filteredUsers.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
-                          暂无匹配用户
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {userLoading && (
+                    <div className="border-t border-border p-6 text-center text-sm text-muted-foreground">
+                      正在加载用户数据...
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3 border-t border-border p-4 md:flex-row md:items-center md:justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      第 {userPage.pageNum || 1} 页，每页 {userPage.pageSize || pageSize} 条，共 {userPage.total} 条
+                    </p>
+                    <Pagination className="mx-0 w-auto justify-start md:justify-end">
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious
+                            href="#"
+                            className={userPage.pageNum <= 1 ? "pointer-events-none opacity-50" : ""}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              handleUserPageChange(userPage.pageNum - 1)
+                            }}
+                          />
+                        </PaginationItem>
+                        {visibleUserPages.map((page) => (
+                          <PaginationItem key={page}>
+                            <PaginationLink
+                              href="#"
+                              isActive={page === userPage.pageNum}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                handleUserPageChange(page)
+                              }}
+                            >
+                              {page}
+                            </PaginationLink>
+                          </PaginationItem>
+                        ))}
+                        <PaginationItem>
+                          <PaginationNext
+                            href="#"
+                            className={userPage.pageNum >= userPage.pages ? "pointer-events-none opacity-50" : ""}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              handleUserPageChange(userPage.pageNum + 1)
+                            }}
+                          />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  </div>
+                </CardContent>
               </Card>
             </div>
           )}
@@ -869,7 +1106,7 @@ export default function AdminPage() {
           <DialogHeader>
             <DialogTitle>用户详情</DialogTitle>
             <DialogDescription>
-              {detailUser ? `${detailUser.realName} 的账号档案` : ""}
+              {detailUser ? `${detailUser.realName || detailUser.username} 的账号档案` : ""}
             </DialogDescription>
           </DialogHeader>
           {detailUser && (
@@ -880,46 +1117,46 @@ export default function AdminPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-real-name">真实姓名</Label>
-                <Input id="detail-real-name" value={detailUser.realName} readOnly className="bg-secondary" />
+                <Input id="detail-real-name" value={detailUser.realName || "-"} readOnly className="bg-secondary" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-gender">性别</Label>
-                <Input id="detail-gender" value={detailUser.gender} readOnly className="bg-secondary" />
+                <Input id="detail-gender" value={getGenderLabel(detailUser.gender)} readOnly className="bg-secondary" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-phone">手机号</Label>
-                <Input id="detail-phone" value={detailUser.phone} readOnly className="bg-secondary font-mono" />
+                <Input id="detail-phone" value={detailUser.phone || "-"} readOnly className="bg-secondary font-mono" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-role">role</Label>
-                <Input id="detail-role" value={detailUser.role} readOnly className="bg-secondary font-mono" />
+                <Input id="detail-role" value={detailUser.role || "-"} readOnly className="bg-secondary font-mono" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-status">账号状态</Label>
-                <Input id="detail-status" value={detailUser.status} readOnly className="bg-secondary" />
+                <Input id="detail-status" value={getUserStatusLabel(detailUser.status)} readOnly className="bg-secondary" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-email">邮箱</Label>
-                <Input id="detail-email" value={detailUser.email} readOnly className="bg-secondary" />
+                <Input id="detail-email" value={detailUser.email || "-"} readOnly className="bg-secondary" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="detail-locked-until">locked_until</Label>
                 <Input
                   id="detail-locked-until"
-                  value={detailUser.lockedUntil}
+                  value={formatDateTime(detailUser.lockedUntil)}
                   readOnly
                   className="bg-secondary font-mono"
                 />
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="detail-address">地址</Label>
-                <Input id="detail-address" value={detailUser.address} readOnly className="bg-secondary" />
+                <Input id="detail-address" value={detailUser.address || "-"} readOnly className="bg-secondary" />
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="detail-last-operated-at">最后操作时间</Label>
                 <Input
                   id="detail-last-operated-at"
-                  value={detailUser.lastOperatedAt}
+                  value={formatDateTime(detailUser.lastOperationTime)}
                   readOnly
                   className="bg-secondary font-mono"
                 />
@@ -934,39 +1171,56 @@ export default function AdminPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(passwordUser)} onOpenChange={(open) => !open && setPasswordUser(null)}>
+      <Dialog
+        open={Boolean(passwordUser)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPasswordUser(null)
+            setNewPassword("")
+            setConfirmPassword("")
+          }
+        }}
+      >
         <DialogContent className="bg-card border-border sm:max-w-md">
           <DialogHeader>
             <DialogTitle>重置密码</DialogTitle>
             <DialogDescription>
-              {passwordUser ? `${passwordUser.realName}（${passwordUser.username}）` : ""}
+              {passwordUser ? `${passwordUser.realName || passwordUser.username}（${passwordUser.username}）` : ""}
             </DialogDescription>
           </DialogHeader>
           <form
             className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault()
-              setPasswordUser(null)
-              toast({ title: "操作成功" })
-            }}
+            onSubmit={handleResetPassword}
           >
             <div className="space-y-2">
-              <Label htmlFor="old-password">旧密码</Label>
-              <Input id="old-password" type="password" placeholder="请输入旧密码" className="bg-secondary" />
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="new-password">新密码</Label>
-              <Input id="new-password" type="password" placeholder="请输入新密码" className="bg-secondary" />
+              <Input
+                id="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                type="password"
+                placeholder="请输入新密码"
+                className="bg-secondary"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirm-password">确认新密码</Label>
-              <Input id="confirm-password" type="password" placeholder="请再次输入新密码" className="bg-secondary" />
+              <Input
+                id="confirm-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                type="password"
+                placeholder="请再次输入新密码"
+                className="bg-secondary"
+              />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setPasswordUser(null)}>
                 取消
               </Button>
-              <Button type="submit">确认重置</Button>
+              <Button type="submit" disabled={passwordUser ? actionUserId === passwordUser.userId : false}>
+                确认重置
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
