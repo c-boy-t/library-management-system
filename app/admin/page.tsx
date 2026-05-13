@@ -49,6 +49,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { ApiError } from "@/lib/api"
+import { BookManagement } from "@/components/admin/book-management"
 import {
   fetchAdminUsers,
   resetAdminUserPassword,
@@ -563,64 +564,7 @@ export default function AdminPage() {
           )}
 
           {activeNav === "books" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="relative w-64">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input placeholder="搜索图书..." className="pl-10 bg-card" />
-                </div>
-                <Button onClick={() => setShowAddBookModal(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  新增图书
-                </Button>
-              </div>
-
-              <Card className="bg-card">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ISBN</TableHead>
-                      <TableHead>书名</TableHead>
-                      <TableHead>作者</TableHead>
-                      <TableHead>分类</TableHead>
-                      <TableHead>库存</TableHead>
-                      <TableHead className="w-[80px]">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {books.map((book) => (
-                      <TableRow key={book.id}>
-                        <TableCell className="font-mono text-sm">{book.isbn}</TableCell>
-                        <TableCell className="font-medium">{book.title}</TableCell>
-                        <TableCell>{book.author}</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">{book.category}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className={book.stock === 0 ? "text-destructive" : ""}>
-                            {book.stock}/{book.total}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem>编辑</DropdownMenuItem>
-                              <DropdownMenuItem>查看详情</DropdownMenuItem>
-                              <DropdownMenuItem className="text-destructive">删除</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Card>
-            </div>
+            <BookManagement />
           )}
 
           {activeNav === "users" && (
