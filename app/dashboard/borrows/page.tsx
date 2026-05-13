@@ -1,108 +1,204 @@
-"use client"
+'use client'
 
-import Link from "next/link"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
-  BookOpen,
-  Clock,
   AlertTriangle,
-  CheckCircle2,
   ArrowLeft,
-  Calendar,
-  RotateCcw,
   ArrowUpRight,
-} from "lucide-react"
+  BookOpen,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  RotateCcw,
+} from 'lucide-react'
 
-const currentBorrows = [
-  {
-    id: 1,
-    title: "深度学习入门",
-    author: "斋藤康毅",
-    isbn: "9787115485588",
-    borrowDate: "2026-04-15",
-    dueDate: "2026-05-15",
-    daysLeft: 5,
-    status: "normal",
-    renewed: false,
-  },
-  {
-    id: 2,
-    title: "人类简史",
-    author: "尤瓦尔·赫拉利",
-    isbn: "9787508647357",
-    borrowDate: "2026-04-20",
-    dueDate: "2026-05-20",
-    daysLeft: 10,
-    status: "normal",
-    renewed: false,
-  },
-  {
-    id: 3,
-    title: "三体",
-    author: "刘慈欣",
-    isbn: "9787020002207",
-    borrowDate: "2026-03-25",
-    dueDate: "2026-04-24",
-    daysLeft: -16,
-    status: "overdue",
-    renewed: true,
-  },
-]
+import { Footer } from '@/components/footer'
+import { Header } from '@/components/header'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  fetchMyBorrowingHistory,
+  fetchMyBorrowingSummary,
+  fetchMyCurrentBorrowings,
+  renewBorrowing,
+  returnBorrowing,
+  type BorrowingRecord,
+  type BorrowingSummary,
+} from '@/lib/borrowings'
+import { ApiError } from '@/lib/api'
+import { logError } from '@/lib/logger'
+import { toast } from '@/hooks/use-toast'
+import { useAuthStore } from '@/store/auth-store'
 
-const historyBorrows = [
-  {
-    id: 4,
-    title: "Python编程：从入门到实践",
-    author: "埃里克·马瑟斯",
-    borrowDate: "2026-03-10",
-    returnDate: "2026-04-10",
-  },
-  {
-    id: 5,
-    title: "算法导论",
-    author: "Thomas H. Cormen",
-    borrowDate: "2026-02-20",
-    returnDate: "2026-03-28",
-  },
-  {
-    id: 6,
-    title: "设计模式",
-    author: "Erich Gamma",
-    borrowDate: "2026-02-01",
-    returnDate: "2026-03-15",
-  },
-  {
-    id: 7,
-    title: "活着",
-    author: "余华",
-    borrowDate: "2026-01-15",
-    returnDate: "2026-02-10",
-  },
-  {
-    id: 8,
-    title: "红楼梦",
-    author: "曹雪芹",
-    borrowDate: "2025-12-20",
-    returnDate: "2026-01-20",
-  },
-]
+const emptySummary: BorrowingSummary = {
+  currentBorrowingCount: 0,
+  dueSoonCount: 0,
+  overdueBookCount: 0,
+  overdueFineAll: 0,
+  historyBorrowingCount: 0,
+}
+
+interface BorrowingViewModel extends BorrowingRecord {
+  daysUntilDue: number
+  isDueSoon: boolean
+  isOverdue: boolean
+  statusLabel: string
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.message
+  }
+
+  return '借阅数据加载失败，请稍后重试'
+}
+
+function formatDate(date: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(date))
+}
+
+function getDaysUntilDue(dueDate: string) {
+  const due = new Date(dueDate).getTime()
+  return Math.ceil((due - Date.now()) / (1000 * 60 * 60 * 24))
+}
+
+function toBorrowingView(record: BorrowingRecord): BorrowingViewModel {
+  const daysUntilDue = getDaysUntilDue(record.dueDate)
+  const isOverdue = daysUntilDue < 0 || record.status === 'OVERDUE'
+  const isDueSoon = !isOverdue && daysUntilDue <= 7
+
+  return {
+    ...record,
+    daysUntilDue,
+    isDueSoon,
+    isOverdue,
+    statusLabel: isOverdue ? `逾期 ${Math.abs(daysUntilDue)} 天` : `${daysUntilDue} 天后到期`,
+  }
+}
 
 export default function BorrowsPage() {
-  const overdueCount = currentBorrows.filter(b => b.status === "overdue").length
-  const nearDueCount = currentBorrows.filter(b => b.status === "normal" && b.daysLeft <= 7).length
+  const router = useRouter()
+  const token = useAuthStore((state) => state.token)
+  const user = useAuthStore((state) => state.user)
+  const hydrated = useAuthStore((state) => state.hydrated)
+  const [summary, setSummary] = useState<BorrowingSummary>(emptySummary)
+  const [currentBorrowings, setCurrentBorrowings] = useState<BorrowingRecord[]>([])
+  const [historyBorrowings, setHistoryBorrowings] = useState<BorrowingRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actionBorrowId, setActionBorrowId] = useState<number | null>(null)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  const currentViews = useMemo(() => currentBorrowings.map(toBorrowingView), [currentBorrowings])
+
+  const totalBorrowingCount = summary.historyBorrowingCount
+  const currentBorrowingCount = summary.currentBorrowingCount || currentBorrowings.length
+  const overdueCount = summary.overdueBookCount || currentViews.filter((book) => book.isOverdue).length
+  const dueSoonCount = summary.dueSoonCount || currentViews.filter((book) => book.isDueSoon).length
+
+  const loadBorrowings = useCallback(async () => {
+    if (!token) {
+      return
+    }
+
+    setLoading(true)
+    setErrorMessage('')
+    try {
+      const [nextSummary, currentPage, historyPage] = await Promise.all([
+        fetchMyBorrowingSummary(token),
+        fetchMyCurrentBorrowings(token, 100),
+        fetchMyBorrowingHistory(token, 100),
+      ])
+
+      setSummary(nextSummary)
+      setCurrentBorrowings(currentPage.list)
+      setHistoryBorrowings(historyPage.list)
+    } catch (error) {
+      logError('borrows.load', error)
+      setErrorMessage(getErrorMessage(error))
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
+  const handleRenew = useCallback(async (borrowId: number) => {
+    if (!token) {
+      router.replace('/login')
+      return
+    }
+
+    setActionBorrowId(borrowId)
+    try {
+      const renewed = await renewBorrowing(token, borrowId)
+      setCurrentBorrowings((records) => records.map((record) => (
+        record.borrowId === borrowId ? renewed : record
+      )))
+      toast({ title: '续借成功' })
+      void loadBorrowings()
+    } catch (error) {
+      logError('borrows.renew', error)
+      toast({
+        title: '续借失败',
+        description: getErrorMessage(error),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionBorrowId(null)
+    }
+  }, [loadBorrowings, router, token])
+
+  const handleReturn = useCallback(async (borrowId: number) => {
+    if (!token) {
+      router.replace('/login')
+      return
+    }
+
+    setActionBorrowId(borrowId)
+    try {
+      const returned = await returnBorrowing(token, borrowId)
+      setCurrentBorrowings((records) => records.filter((record) => record.borrowId !== borrowId))
+      setHistoryBorrowings((records) => [returned, ...records]
+        .sort((a, b) => new Date(b.returnDate ?? 0).getTime() - new Date(a.returnDate ?? 0).getTime()))
+      toast({ title: '归还成功' })
+      void loadBorrowings()
+    } catch (error) {
+      logError('borrows.return', error)
+      toast({
+        title: '归还失败',
+        description: getErrorMessage(error),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionBorrowId(null)
+    }
+  }, [loadBorrowings, router, token])
+
+  useEffect(() => {
+    if (!hydrated && (!token || !user)) {
+      return
+    }
+
+    if (!token || !user) {
+      router.replace('/login')
+      return
+    }
+
+    void loadBorrowings()
+  }, [hydrated, loadBorrowings, router, token, user])
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex min-h-screen flex-col">
       <Header />
-      
+
       <main className="flex-1 bg-background">
         <div className="container mx-auto px-4 py-8">
-          {/* Back Link */}
           <Button variant="ghost" asChild className="mb-6">
             <Link href="/dashboard">
               <ArrowLeft className="mr-2 h-4 w-4" />
@@ -110,177 +206,243 @@ export default function BorrowsPage() {
             </Link>
           </Button>
 
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl font-bold">我的借阅</h1>
               <p className="text-muted-foreground">管理您的借阅图书</p>
             </div>
-            
-            <div className="flex gap-3">
+
+            <div className="flex flex-wrap gap-3">
               {overdueCount > 0 && (
                 <Badge variant="destructive" className="h-8 px-3">
                   <AlertTriangle className="mr-1 h-3.5 w-3.5" />
                   {overdueCount} 本逾期
                 </Badge>
               )}
-              {nearDueCount > 0 && (
-                <Badge className="h-8 px-3 bg-accent/20 text-accent">
+              {dueSoonCount > 0 && (
+                <Badge className="h-8 bg-accent/20 px-3 text-accent">
                   <Clock className="mr-1 h-3.5 w-3.5" />
-                  {nearDueCount} 本即将到期
+                  {dueSoonCount} 本即将到期
                 </Badge>
               )}
             </div>
           </div>
 
-          <Tabs defaultValue="current" className="space-y-6">
-            <TabsList className="bg-card border border-border h-auto p-1">
-              <TabsTrigger value="current" className="px-4">
-                <BookOpen className="mr-2 h-4 w-4" />
-                当前借阅 ({currentBorrows.length})
-              </TabsTrigger>
-              <TabsTrigger value="history" className="px-4">
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                借阅历史 ({historyBorrows.length})
-              </TabsTrigger>
-            </TabsList>
+          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Card className="bg-card">
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">当前借阅</p>
+                <p className="mt-1 text-2xl font-bold">{currentBorrowingCount}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-card">
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">逾期图书</p>
+                <p className="mt-1 text-2xl font-bold text-destructive">{overdueCount}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-card">
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">即将到期</p>
+                <p className="mt-1 text-2xl font-bold text-accent">{dueSoonCount}</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-card">
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">总借阅</p>
+                <p className="mt-1 text-2xl font-bold">{totalBorrowingCount}</p>
+              </CardContent>
+            </Card>
+          </div>
 
-            {/* Current Borrows */}
-            <TabsContent value="current">
-              <div className="space-y-4">
-                {currentBorrows.map((book) => (
-                  <Card key={book.id} className={`bg-card ${book.status === "overdue" ? "border-destructive/50" : ""}`}>
-                    <CardContent className="p-6">
-                      <div className="flex flex-col md:flex-row md:items-center gap-4">
-                        {/* Book Cover */}
-                        <div className="h-24 w-16 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-                          <BookOpen className="h-8 w-8 text-muted-foreground" />
-                        </div>
+          {loading && (
+            <Card className="bg-card">
+              <CardContent className="p-10 text-center text-sm text-muted-foreground">
+                正在加载借阅数据...
+              </CardContent>
+            </Card>
+          )}
 
-                        {/* Book Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-4 mb-2">
+          {!loading && errorMessage && (
+            <Card className="border-destructive/40 bg-destructive/10">
+              <CardContent className="p-10 text-center text-sm text-destructive">
+                {errorMessage}
+              </CardContent>
+            </Card>
+          )}
+
+          {!loading && !errorMessage && (
+            <Tabs defaultValue="current" className="space-y-6">
+              <TabsList className="h-auto border border-border bg-card p-1">
+                <TabsTrigger value="current" className="px-4">
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  当前借阅 ({currentBorrowingCount})
+                </TabsTrigger>
+                <TabsTrigger value="history" className="px-4">
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  借阅历史 ({historyBorrowings.length})
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="current">
+                <div className="space-y-4">
+                  {currentViews.map((book) => {
+                    const actionDisabled = actionBorrowId === book.borrowId
+                    const renewed = (book.renewalCount ?? book.renewed ?? 0) >= 1
+
+                    return (
+                      <Card
+                        key={book.borrowId}
+                        className={`bg-card ${book.isOverdue ? 'border-destructive/50' : ''}`}
+                      >
+                        <CardContent className="p-6">
+                          <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                            <div className="flex h-24 w-16 shrink-0 items-center justify-center rounded-lg bg-secondary">
+                              <BookOpen className="h-8 w-8 text-muted-foreground" />
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <Link
+                                    href={`/books/${book.bookId}`}
+                                    className="font-semibold transition-colors hover:text-primary"
+                                  >
+                                    {book.bookTitle}
+                                  </Link>
+                                  <p className="text-sm text-muted-foreground">{book.author}</p>
+                                </div>
+                                {book.isOverdue ? (
+                                  <Badge variant="destructive" className="w-fit">
+                                    {book.statusLabel}
+                                  </Badge>
+                                ) : book.isDueSoon ? (
+                                  <Badge className="w-fit bg-accent/20 text-accent">
+                                    {book.statusLabel}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="w-fit">
+                                    {book.statusLabel}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-4 w-4" />
+                                  <span>借阅：{formatDate(book.borrowDate)}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-4 w-4" />
+                                  <span>到期：{formatDate(book.dueDate)}</span>
+                                </div>
+                              </div>
+
+                              {book.isOverdue && (
+                                <div className="mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                                  <AlertTriangle className="mr-2 inline-block h-4 w-4" />
+                                  此图书已逾期，罚款金额：¥{book.overdueFine.toFixed(2)}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex shrink-0 gap-2 md:flex-col">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={actionDisabled || renewed || book.isOverdue}
+                                className="flex-1 md:flex-none"
+                                onClick={() => {
+                                  void handleRenew(book.borrowId)
+                                }}
+                              >
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                {renewed ? '已续借' : '续借'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled={actionDisabled}
+                                className="flex-1 md:flex-none"
+                                onClick={() => {
+                                  void handleReturn(book.borrowId)
+                                }}
+                              >
+                                归还
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+
+                  {currentViews.length === 0 && (
+                    <Card className="bg-card">
+                      <CardContent className="p-12 text-center">
+                        <BookOpen className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+                        <h3 className="mb-2 text-lg font-semibold">暂无借阅</h3>
+                        <p className="mb-4 text-muted-foreground">您目前没有正在借阅的图书</p>
+                        <Button asChild>
+                          <Link href="/books">
+                            浏览图书
+                            <ArrowUpRight className="ml-2 h-4 w-4" />
+                          </Link>
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="history">
+                <Card className="bg-card">
+                  <CardHeader>
+                    <CardTitle className="text-lg">借阅历史</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {historyBorrowings.map((book) => (
+                        <div
+                          key={book.borrowId}
+                          className="flex flex-col gap-3 rounded-lg bg-secondary/50 p-4 transition-colors hover:bg-secondary sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-12 w-9 shrink-0 items-center justify-center rounded bg-secondary">
+                              <BookOpen className="h-5 w-5 text-muted-foreground" />
+                            </div>
                             <div>
-                              <Link href={`/books/${book.id}`} className="font-semibold hover:text-primary transition-colors">
-                                {book.title}
+                              <Link
+                                href={`/books/${book.bookId}`}
+                                className="font-medium transition-colors hover:text-primary"
+                              >
+                                {book.bookTitle}
                               </Link>
                               <p className="text-sm text-muted-foreground">{book.author}</p>
                             </div>
-                            {book.status === "overdue" ? (
-                              <Badge variant="destructive">
-                                逾期 {Math.abs(book.daysLeft)} 天
-                              </Badge>
-                            ) : book.daysLeft <= 7 ? (
-                              <Badge className="bg-accent/20 text-accent shrink-0">
-                                {book.daysLeft} 天后到期
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary" className="shrink-0">
-                                {book.daysLeft} 天后到期
-                              </Badge>
-                            )}
                           </div>
-
-                          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-4 w-4" />
-                              <span>借阅：{book.borrowDate}</span>
+                          <div className="text-left sm:text-right">
+                            <div className="flex items-center gap-1 text-sm text-muted-foreground sm:justify-end">
+                              <CheckCircle2 className="h-4 w-4 text-primary" />
+                              <span>已归还</span>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <Clock className="h-4 w-4" />
-                              <span>到期：{book.dueDate}</span>
-                            </div>
-                            <div>
-                              <span className="font-mono text-xs">ISBN: {book.isbn}</span>
-                            </div>
-                          </div>
-
-                          {book.status === "overdue" && (
-                            <div className="mt-3 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-                              <AlertTriangle className="inline-block h-4 w-4 mr-2" />
-                              此图书已逾期，罚款金额：¥{(Math.abs(book.daysLeft) * 0.5).toFixed(2)}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex md:flex-col gap-2 shrink-0">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            disabled={book.renewed}
-                            className="flex-1 md:flex-none"
-                          >
-                            <RotateCcw className="mr-2 h-4 w-4" />
-                            {book.renewed ? "已续借" : "续借"}
-                          </Button>
-                          <Button size="sm" className="flex-1 md:flex-none">
-                            归还
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-
-                {currentBorrows.length === 0 && (
-                  <Card className="bg-card">
-                    <CardContent className="p-12 text-center">
-                      <BookOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                      <h3 className="text-lg font-semibold mb-2">暂无借阅</h3>
-                      <p className="text-muted-foreground mb-4">您目前没有正在借阅的图书</p>
-                      <Button asChild>
-                        <Link href="/books">
-                          浏览图书
-                          <ArrowUpRight className="ml-2 h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* History */}
-            <TabsContent value="history">
-              <Card className="bg-card">
-                <CardHeader>
-                  <CardTitle className="text-lg">借阅历史</CardTitle>
-                  <CardDescription>已归还的图书记录</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {historyBorrows.map((book) => (
-                      <div 
-                        key={book.id} 
-                        className="flex items-center justify-between p-4 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="h-12 w-9 rounded bg-secondary flex items-center justify-center shrink-0">
-                            <BookOpen className="h-5 w-5 text-muted-foreground" />
-                          </div>
-                          <div>
-                            <Link href={`/books/${book.id}`} className="font-medium hover:text-primary transition-colors">
-                              {book.title}
-                            </Link>
-                            <p className="text-sm text-muted-foreground">{book.author}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatDate(book.borrowDate)} ~ {book.returnDate ? formatDate(book.returnDate) : '-'}
+                            </p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                            <CheckCircle2 className="h-4 w-4 text-primary" />
-                            <span>已归还</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {book.borrowDate} ~ {book.returnDate}
-                          </p>
+                      ))}
+
+                      {historyBorrowings.length === 0 && (
+                        <div className="rounded-lg bg-secondary/40 p-10 text-center text-sm text-muted-foreground">
+                          暂无借阅历史
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          )}
         </div>
       </main>
 
