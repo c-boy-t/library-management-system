@@ -99,7 +99,8 @@ export async function fetchMyBorrowingHistory(size = 3) {
 export async function borrowBook(bookId: number, remark?: string) {
   return requestJson('/api/v1/borrowings', {
     method: 'POST',
-    body: JSON.stringify(remark ? { bookId, remark } : { bookId }),
+    // remark 为 undefined 时 JSON.stringify 自动省略该字段
+    body: JSON.stringify({ bookId, remark }),
   }, borrowingRecordSchema)
 }
 

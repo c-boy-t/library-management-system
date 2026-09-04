@@ -127,7 +127,6 @@ export default function BookDetailPage() {
     try {
       await borrowBook(book.bookId)
       toast({ title: '借阅成功', description: '可在「我的借阅」中查看借阅详情' })
-      await loadBook(book.bookId)
     } catch (error) {
       logError('book-detail.borrow', error)
       toast({
@@ -135,9 +134,13 @@ export default function BookDetailPage() {
         description: getBorrowErrorMessage(error),
         variant: 'destructive',
       })
+      return
     } finally {
       setBorrowing(false)
     }
+
+    // 借阅已成功，刷新失败不应误报"借阅失败"，交由 loadBook 内部呈现加载错误态
+    await loadBook(book.bookId).catch(() => undefined)
   }, [book, borrowing, hydrated, loadBook, router, toast, token])
 
   const available = (book?.availableCount ?? 0) > 0
