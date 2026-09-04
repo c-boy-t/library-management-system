@@ -90,6 +90,20 @@ export async function fetchMyBorrowingHistory(size = 3) {
 }
 
 /**
+ * 借阅图书。
+ *
+ * @param bookId 图书 ID
+ * @param remark 借阅备注（可选）
+ * @returns 借阅记录
+ */
+export async function borrowBook(bookId: number, remark?: string) {
+  return requestJson('/api/v1/borrowings', {
+    method: 'POST',
+    body: JSON.stringify(remark ? { bookId, remark } : { bookId }),
+  }, borrowingRecordSchema)
+}
+
+/**
  * 续借当前用户的一条借阅记录。
  *
  * @param borrowId 借阅 ID

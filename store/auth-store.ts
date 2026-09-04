@@ -71,6 +71,11 @@ export const useAuthStore = create<AuthState>()(
         expiresAt: state.expiresAt,
         user: state.user,
       }),
+      // 同步 storage 下 persist 的自动 hydrate 会在 create() 求值期间同步执行本回调，
+      // 回调内引用 useAuthStore 将触发 TDZ ReferenceError（异常被 zustand 吞掉，
+      // 导致 hydrated 永远为 false）。因此用 skipHydration 跳过自动 hydrate，
+      // 改为模块级手动触发（见文件末尾），此时 useAuthStore 已完成绑定。
+      skipHydration: true,
       onRehydrateStorage: () => (state) => {
         if (state?.expiresAt && state.expiresAt <= Date.now()) {
           state.clearSession()
@@ -81,3 +86,8 @@ export const useAuthStore = create<AuthState>()(
     },
   ),
 )
+
+// 客户端模块执行时同步完成 rehydration；SSR 环境无 localStorage，跳过。
+if (typeof window !== 'undefined') {
+  void useAuthStore.persist.rehydrate()
+}
