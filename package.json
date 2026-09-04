@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:regression": "node --test tests/admin-access.test.mjs tests/admin-overdue-ack-stream.test.mjs tests/book-discovery.test.mjs tests/borrowing-status.test.mjs tests/dashboard-notifications.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

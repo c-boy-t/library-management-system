@@ -20,3 +20,6 @@ build/
 .env.*.local
 tsconfig.tsbuildinfo
 .DS_Store
+
+# Local run logs
+frontend-run*.log

@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const localApiTarget = process.env.LOCAL_API_PROXY_TARGET || 'http://localhost:8080'
+
 const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
@@ -9,8 +11,8 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
-        destination: 'http://localhost:8080/api/:path*',
+        source: '/api/v1/:path*',
+        destination: `${localApiTarget}/api/v1/:path*`,
       },
     ]
   },

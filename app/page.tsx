@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { buildBooksPageHref } from "@/lib/book-discovery"
 import {
   BookOpen,
   Search,
@@ -103,23 +104,24 @@ export default function HomePage() {
               
               {/* Search Bar */}
               <div className="max-w-xl mx-auto mt-8">
-                <div className="relative">
+                <form action="/books" className="relative">
                   <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
                   <Input
+                    name="search"
                     type="search"
                     placeholder="搜索书名、作者、ISBN..."
                     className="h-14 pl-12 pr-32 text-base bg-card border-border rounded-xl"
                   />
-                  <Button className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg">
+                  <Button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg">
                     搜索图书
                   </Button>
-                </div>
+                </form>
                 <div className="flex flex-wrap justify-center gap-2 mt-4">
                   <span className="text-sm text-muted-foreground">热门搜索:</span>
-                  <Link href="/books?q=python" className="text-sm text-primary hover:underline">Python</Link>
-                  <Link href="/books?q=人工智能" className="text-sm text-primary hover:underline">人工智能</Link>
-                  <Link href="/books?q=数据结构" className="text-sm text-primary hover:underline">数据结构</Link>
-                  <Link href="/books?q=微积分" className="text-sm text-primary hover:underline">微积分</Link>
+                  <Link href={buildBooksPageHref({ search: "python" })} className="text-sm text-primary hover:underline">Python</Link>
+                  <Link href={buildBooksPageHref({ search: "人工智能" })} className="text-sm text-primary hover:underline">人工智能</Link>
+                  <Link href={buildBooksPageHref({ search: "数据结构" })} className="text-sm text-primary hover:underline">数据结构</Link>
+                  <Link href={buildBooksPageHref({ search: "微积分" })} className="text-sm text-primary hover:underline">微积分</Link>
                 </div>
               </div>
             </div>
@@ -207,7 +209,7 @@ export default function HomePage() {
             
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {categories.map((category) => (
-                <Link key={category.code} href={`/categories/${category.code}`}>
+                <Link key={category.code} href={buildBooksPageHref({ category: category.name })}>
                   <Card className="group hover:border-primary/50 transition-colors bg-card h-full">
                     <CardContent className="p-6 text-center">
                       <div className={`inline-flex items-center justify-center h-14 w-14 rounded-xl ${category.color}/20 mb-4`}>

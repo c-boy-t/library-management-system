@@ -1,12 +1,12 @@
 import { z } from 'zod'
 
-import { ApiError, buildAuthHeaders, requestJson } from '@/lib/api'
+import { ApiError, requestJson } from '@/lib/api'
 
 export const authUserSchema = z.object({
   userId: z.number(),
   username: z.string(),
-  email: z.string(),
-  realName: z.string(),
+  email: z.string().optional().nullable(),
+  realName: z.string().optional().nullable(),
   role: z.string(),
 })
 
@@ -42,7 +42,7 @@ export interface AuthRegisterPayload {
 }
 
 /**
- * 用户登录。
+ * 用户登录（匿名接口，跳过令牌注入）。
  *
  * @param payload 登录参数
  * @returns 登录结果
@@ -51,11 +51,11 @@ export async function authLogin(payload: AuthLoginPayload) {
   return requestJson('/api/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
-  }, authLoginResponseSchema)
+  }, authLoginResponseSchema, { skipAuth: true })
 }
 
 /**
- * 用户注册。
+ * 用户注册（匿名接口，跳过令牌注入）。
  *
  * @param payload 注册参数
  * @returns 注册后的用户摘要
@@ -67,31 +67,26 @@ export async function authRegister(payload: AuthRegisterPayload) {
       ...payload,
       phone: payload.phone?.trim() || undefined,
     }),
-  }, authUserSchema)
+  }, authUserSchema, { skipAuth: true })
 }
 
 /**
- * 刷新访问令牌。
+ * 刷新访问令牌（自动携带当前令牌）。
  *
- * @param token 旧令牌
  * @returns 新令牌响应
  */
-export async function authRefreshToken(token: string) {
+export async function authRefreshToken() {
   return requestJson('/api/v1/auth/refresh-token', {
     method: 'POST',
-    headers: buildAuthHeaders(token, false),
   }, authTokenResponseSchema)
 }
 
 /**
- * 用户登出。
- *
- * @param token 当前令牌
+ * 用户登出（自动携带当前令牌）。
  */
-export async function authLogout(token: string) {
+export async function authLogout() {
   return requestJson('/api/v1/auth/logout', {
     method: 'POST',
-    headers: buildAuthHeaders(token, false),
   }, z.null())
 }
 

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { buildAuthHeaders, requestJson } from '@/lib/api'
+import { requestJson } from '@/lib/api'
 
 const numericAmountSchema = z.union([z.number(), z.string()]).transform((value) => Number(value) || 0)
 
@@ -33,7 +33,7 @@ export const borrowingSummarySchema = z.object({
   historyBorrowingCount: z.number(),
 })
 
-const borrowingPageSchema = z.object({
+export const borrowingPageSchema = z.object({
   total: z.number(),
   pages: z.number(),
   pageNum: z.number(),
@@ -48,23 +48,20 @@ export type BorrowingPage = z.infer<typeof borrowingPageSchema>
 /**
  * 获取当前用户借阅统计概览。
  *
- * @param token 访问令牌
  * @returns 借阅统计概览
  */
-export async function fetchMyBorrowingSummary(token: string) {
+export async function fetchMyBorrowingSummary() {
   return requestJson('/api/v1/borrowings/me/summary', {
     method: 'GET',
-    headers: buildAuthHeaders(token, false),
   }, borrowingSummarySchema)
 }
 
 /**
  * 获取当前用户借阅列表。
  *
- * @param token 访问令牌
  * @returns 当前借阅分页结果
  */
-export async function fetchMyCurrentBorrowings(token: string, size = 3) {
+export async function fetchMyCurrentBorrowings(size = 3) {
   const search = new URLSearchParams({
     page: '1',
     size: String(size),
@@ -73,17 +70,15 @@ export async function fetchMyCurrentBorrowings(token: string, size = 3) {
 
   return requestJson(`/api/v1/borrowings/me?${search.toString()}`, {
     method: 'GET',
-    headers: buildAuthHeaders(token, false),
   }, borrowingPageSchema)
 }
 
 /**
  * 获取当前用户最近归还的历史借阅。
  *
- * @param token 访问令牌
  * @returns 历史借阅分页结果
  */
-export async function fetchMyBorrowingHistory(token: string, size = 3) {
+export async function fetchMyBorrowingHistory(size = 3) {
   const search = new URLSearchParams({
     page: '1',
     size: String(size),
@@ -91,34 +86,29 @@ export async function fetchMyBorrowingHistory(token: string, size = 3) {
 
   return requestJson(`/api/v1/borrowings/history?${search.toString()}`, {
     method: 'GET',
-    headers: buildAuthHeaders(token, false),
   }, borrowingPageSchema)
 }
 
 /**
  * 续借当前用户的一条借阅记录。
  *
- * @param token 访问令牌
  * @param borrowId 借阅 ID
  * @returns 续借后的借阅记录
  */
-export async function renewBorrowing(token: string, borrowId: number) {
+export async function renewBorrowing(borrowId: number) {
   return requestJson(`/api/v1/borrowings/${borrowId}/renew`, {
     method: 'POST',
-    headers: buildAuthHeaders(token, false),
   }, borrowingRecordSchema)
 }
 
 /**
  * 归还当前用户的一条借阅记录。
  *
- * @param token 访问令牌
  * @param borrowId 借阅 ID
  * @returns 归还后的借阅记录
  */
-export async function returnBorrowing(token: string, borrowId: number) {
+export async function returnBorrowing(borrowId: number) {
   return requestJson(`/api/v1/borrowings/${borrowId}/return`, {
     method: 'POST',
-    headers: buildAuthHeaders(token, false),
   }, borrowingRecordSchema)
 }

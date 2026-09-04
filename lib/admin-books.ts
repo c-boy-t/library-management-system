@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { buildAuthHeaders, requestJson } from '@/lib/api'
+import { ApiError, buildApiUrl, buildAuthHeaders, getAuthToken, requestJson } from '@/lib/api'
 
 const nullableNumberSchema = z.union([z.number(), z.string(), z.null(), z.undefined()])
   .transform((value) => {
@@ -77,7 +77,7 @@ export interface BookUpsertPayload {
   coverUrl?: string
 }
 
-export async function fetchAdminBooks(token: string, params: FetchAdminBooksParams) {
+export async function fetchAdminBooks(params: FetchAdminBooksParams) {
   const search = new URLSearchParams({
     page: String(params.page),
     size: String(params.size),
@@ -96,23 +96,20 @@ export async function fetchAdminBooks(token: string, params: FetchAdminBooksPara
     search.set('categoryId', String(params.categoryId))
   }
 
-  return requestJson(`/api/v1/books?${search.toString()}`, {
+  return requestJson(`/api/v1/admin/books?${search.toString()}`, {
     method: 'GET',
-    headers: buildAuthHeaders(token, false),
   }, bookPageSchema)
 }
 
-export async function fetchBookDetail(token: string, bookId: number) {
-  return requestJson(`/api/v1/books/${bookId}`, {
+export async function fetchBookDetail(bookId: number) {
+  return requestJson(`/api/v1/admin/books/${bookId}`, {
     method: 'GET',
-    headers: buildAuthHeaders(token, false),
   }, bookDetailSchema)
 }
 
-export async function createAdminBook(token: string, payload: BookUpsertPayload) {
+export async function createAdminBook(payload: BookUpsertPayload) {
   return requestJson('/api/v1/admin/books', {
     method: 'POST',
-    headers: buildAuthHeaders(token),
     body: JSON.stringify({
       ...payload,
       publishYear: nullableNumberSchema.parse(payload.publishYear),
@@ -122,10 +119,9 @@ export async function createAdminBook(token: string, payload: BookUpsertPayload)
   }, bookDetailSchema)
 }
 
-export async function updateAdminBook(token: string, bookId: number, payload: BookUpsertPayload) {
+export async function updateAdminBook(bookId: number, payload: BookUpsertPayload) {
   return requestJson(`/api/v1/admin/books/${bookId}`, {
     method: 'PUT',
-    headers: buildAuthHeaders(token),
     body: JSON.stringify({
       ...payload,
       publishYear: nullableNumberSchema.parse(payload.publishYear),
@@ -135,9 +131,39 @@ export async function updateAdminBook(token: string, bookId: number, payload: Bo
   }, bookDetailSchema)
 }
 
-export async function deleteAdminBook(token: string, bookId: number) {
+export async function deleteAdminBook(bookId: number) {
   return requestJson(`/api/v1/admin/books/${bookId}`, {
     method: 'DELETE',
-    headers: buildAuthHeaders(token, false),
   }, z.void())
+}
+
+export async function uploadBookCover(file: File) {
+  const formData = new FormData()
+  formData.set('file', file)
+
+  const response = await fetch(buildApiUrl('/api/v1/books/covers'), {
+    method: 'POST',
+    headers: buildAuthHeaders(getAuthToken(), false),
+    body: formData,
+  })
+  const payload = await response.json().catch(() => null)
+  const parsed = z.object({
+    code: z.number(),
+    message: z.string().optional().default('Success'),
+    data: z.string().optional().nullable(),
+  }).safeParse(payload)
+
+  if (!parsed.success) {
+    throw new ApiError(response.status || 500, response.ok ? 'Invalid API response' : response.statusText || 'Request failed')
+  }
+
+  if (!response.ok || parsed.data.code >= 400) {
+    throw new ApiError(response.status || parsed.data.code || 500, parsed.data.message || 'Request failed')
+  }
+
+  if (!parsed.data.data) {
+    throw new ApiError(response.status || 500, 'Invalid cover upload response')
+  }
+
+  return parsed.data.data
 }

@@ -1,7 +1,8 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { BookOpen, Filter, Search, Star } from 'lucide-react'
 import { z } from 'zod'
 
@@ -14,6 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { ApiError, requestJson } from '@/lib/api'
+import { readBooksPageState } from '@/lib/book-discovery'
 import { logError } from '@/lib/logger'
 
 interface Book {
@@ -117,12 +119,16 @@ async function fetchBooks(search?: string) {
   }
 }
 
-export default function BooksPage() {
-  const [searchValue, setSearchValue] = useState('')
-  const [submittedSearch, setSubmittedSearch] = useState('')
+interface BooksPageContentProps {
+  initialCategory: string
+  initialSearch: string
+}
+
+function BooksPageContent({ initialCategory, initialSearch }: BooksPageContentProps) {
+  const [searchValue, setSearchValue] = useState(initialSearch)
+  const [submittedSearch, setSubmittedSearch] = useState(initialSearch)
   const [books, setBooks] = useState<Book[]>([])
-  const [serverTotal, setServerTotal] = useState(0)
-  const [selectedCategory, setSelectedCategory] = useState('全部')
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory || '全部')
   const [selectedYears, setSelectedYears] = useState<string[]>([])
   const [selectedAvailability, setSelectedAvailability] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -138,12 +144,9 @@ export default function BooksPage() {
     try {
       const result = await fetchBooks(search)
       setBooks(result.books)
-      setServerTotal(result.total)
-      setSelectedCategory('全部')
     } catch (error) {
       logError('books.load', error)
       setBooks([])
-      setServerTotal(0)
       setErrorMessage(getErrorMessage(error))
     } finally {
       setLoading(false)
@@ -165,13 +168,16 @@ export default function BooksPage() {
   }, [books, selectedAvailability, selectedCategory, selectedYears])
 
   useEffect(() => {
-    void loadBooks()
-  }, [loadBooks])
+    const timer = window.setTimeout(() => {
+      void loadBooks(submittedSearch)
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [loadBooks, submittedSearch])
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSubmittedSearch(searchValue)
-    void loadBooks(searchValue)
+    setSubmittedSearch(searchValue.trim())
   }
 
   function toggleFilter(value: string, selected: string[], onChange: (next: string[]) => void) {
@@ -376,5 +382,43 @@ export default function BooksPage() {
 
       <Footer />
     </div>
+  )
+}
+
+function BooksPageFallback() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+      <main className="flex-1 bg-background">
+        <div className="container mx-auto px-4 py-8">
+          <div className="rounded-lg border bg-card/70 p-10 text-center text-sm text-muted-foreground">
+            正在加载图书页面...
+          </div>
+        </div>
+      </main>
+      <Footer />
+    </div>
+  )
+}
+
+function BooksPageRouteState() {
+  const searchParams = useSearchParams()
+  const searchParamsKey = searchParams.toString()
+  const initialPageState = readBooksPageState(searchParams)
+
+  return (
+    <BooksPageContent
+      key={searchParamsKey}
+      initialCategory={initialPageState.category}
+      initialSearch={initialPageState.search}
+    />
+  )
+}
+
+export default function BooksPage() {
+  return (
+    <Suspense fallback={<BooksPageFallback />}>
+      <BooksPageRouteState />
+    </Suspense>
   )
 }

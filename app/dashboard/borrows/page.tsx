@@ -112,9 +112,9 @@ export default function BorrowsPage() {
     setErrorMessage('')
     try {
       const [nextSummary, currentPage, historyPage] = await Promise.all([
-        fetchMyBorrowingSummary(token),
-        fetchMyCurrentBorrowings(token, 100),
-        fetchMyBorrowingHistory(token, 100),
+        fetchMyBorrowingSummary(),
+        fetchMyCurrentBorrowings(100),
+        fetchMyBorrowingHistory(100),
       ])
 
       setSummary(nextSummary)
@@ -136,7 +136,7 @@ export default function BorrowsPage() {
 
     setActionBorrowId(borrowId)
     try {
-      const renewed = await renewBorrowing(token, borrowId)
+      const renewed = await renewBorrowing(borrowId)
       setCurrentBorrowings((records) => records.map((record) => (
         record.borrowId === borrowId ? renewed : record
       )))
@@ -162,7 +162,7 @@ export default function BorrowsPage() {
 
     setActionBorrowId(borrowId)
     try {
-      const returned = await returnBorrowing(token, borrowId)
+      const returned = await returnBorrowing(borrowId)
       setCurrentBorrowings((records) => records.filter((record) => record.borrowId !== borrowId))
       setHistoryBorrowings((records) => [returned, ...records]
         .sort((a, b) => new Date(b.returnDate ?? 0).getTime() - new Date(a.returnDate ?? 0).getTime()))
@@ -190,7 +190,11 @@ export default function BorrowsPage() {
       return
     }
 
-    void loadBorrowings()
+    const timer = window.setTimeout(() => {
+      void loadBorrowings()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
   }, [hydrated, loadBorrowings, router, token, user])
 
   return (

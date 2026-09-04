@@ -38,11 +38,9 @@ export function Header() {
   const isAuthenticated = Boolean(token && user)
 
   const handleLogout = useCallback(async () => {
-    const currentToken = useAuthStore.getState().token
-
     try {
-      if (currentToken) {
-        await authLogout(currentToken)
+      if (useAuthStore.getState().token) {
+        await authLogout()
       }
       toast({
         title: '已退出登录',

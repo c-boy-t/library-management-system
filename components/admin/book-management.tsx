@@ -40,6 +40,7 @@ import {
   fetchAdminBooks,
   fetchBookDetail,
   updateAdminBook,
+  uploadBookCover,
   type BookDetail,
   type BookListItem,
   type BookPage,
@@ -47,13 +48,7 @@ import {
 import { fetchCategories, type Category } from "@/lib/categories"
 import { logError } from "@/lib/logger"
 import { useAuthStore } from "@/store/auth-store"
-import { BookOpen, Plus, RotateCcw, Search, MoreHorizontal, Pencil, Trash2 } from "lucide-react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { ImagePlus, Plus, RotateCcw, Search, Pencil, Trash2, X } from "lucide-react"
 
 type BookSearchState = {
   title: string
@@ -76,6 +71,8 @@ type BookFormState = {
 }
 
 const pageSize = 10
+const maxCoverSize = 5 * 1024 * 1024
+const allowedCoverExtensions = [".jpg", ".jpeg", ".png", ".webp"]
 
 const emptyBookPage: BookPage = {
   total: 0,
@@ -152,7 +149,7 @@ function toBookForm(detail: BookDetail): BookFormState {
   }
 }
 
-export function BookManagement() {
+export function BookManagement({ refreshKey }: { refreshKey: number }) {
   const router = useRouter()
   const token = useAuthStore((state) => state.token)
   const hydrated = useAuthStore((state) => state.hydrated)
@@ -179,6 +176,8 @@ export function BookManagement() {
   const [bookForm, setBookForm] = useState<BookFormState>(emptyBookForm)
   const [dialogLoading, setDialogLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [coverUploading, setCoverUploading] = useState(false)
+  const [coverFileName, setCoverFileName] = useState("")
   const [actionBookId, setActionBookId] = useState<number | null>(null)
 
   const visiblePages = useMemo(
@@ -204,7 +203,7 @@ export function BookManagement() {
     }
   }, [toast])
 
-  const loadBooks = useCallback(async (page = 1, nextQuery = query) => {
+  const loadBooks = useCallback(async (page: number, nextQuery: BookSearchState) => {
     if (!token) {
       return
     }
@@ -212,7 +211,7 @@ export function BookManagement() {
     setBookLoading(true)
     setBookError("")
     try {
-      const result = await fetchAdminBooks(token, {
+      const result = await fetchAdminBooks({
         page,
         size: pageSize,
         ...toSearchQuery(nextQuery),
@@ -234,6 +233,8 @@ export function BookManagement() {
     setEditingBookId(null)
     setMode("create")
     setBookForm(emptyBookForm)
+    setCoverUploading(false)
+    setCoverFileName("")
   }, [])
 
   const openCreateDialog = () => {
@@ -254,7 +255,7 @@ export function BookManagement() {
     setDialogOpen(true)
     setDialogLoading(true)
     try {
-      const detail = await fetchBookDetail(token, book.bookId)
+      const detail = await fetchBookDetail(book.bookId)
       setBookForm(toBookForm(detail))
     } catch (error) {
       logError("admin.books.detail", error)
@@ -287,6 +288,55 @@ export function BookManagement() {
     void loadBooks(1, nextQuery)
   }
 
+  const handleCoverFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file) {
+      return
+    }
+    if (!token) {
+      router.replace("/login")
+      return
+    }
+
+    const lowerName = file.name.toLowerCase()
+    const allowed = allowedCoverExtensions.some((extension) => lowerName.endsWith(extension))
+    if (!allowed) {
+      toast({
+        title: "封面格式不支持",
+        description: "仅支持 JPG、JPEG、PNG、WEBP 格式",
+        variant: "destructive",
+      })
+      return
+    }
+    if (file.size > maxCoverSize) {
+      toast({
+        title: "封面文件过大",
+        description: "单个封面文件不能超过 5MB",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setCoverUploading(true)
+    setCoverFileName(file.name)
+    try {
+      const coverUrl = await uploadBookCover(file)
+      setBookForm((current) => ({ ...current, coverUrl }))
+      toast({ title: "封面上传成功" })
+    } catch (error) {
+      logError("admin.books.cover-upload", error)
+      setCoverFileName("")
+      toast({
+        title: "封面上传失败",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      })
+    } finally {
+      setCoverUploading(false)
+    }
+  }
+
   const handlePageChange = (page: number) => {
     if (page < 1 || (bookPage.pages > 0 && page > bookPage.pages) || page === bookPage.pageNum) {
       return
@@ -307,7 +357,7 @@ export function BookManagement() {
 
     setActionBookId(book.bookId)
     try {
-      await deleteAdminBook(token, book.bookId)
+      await deleteAdminBook(book.bookId)
       toast({ title: "删除成功" })
       const targetPage = bookPage.list.length === 1 && bookPage.pageNum > 1 ? bookPage.pageNum - 1 : bookPage.pageNum
       await loadBooks(targetPage, query)
@@ -358,7 +408,7 @@ export function BookManagement() {
       }
 
       if (mode === "create") {
-        await createAdminBook(token, payload)
+        await createAdminBook(payload)
         toast({ title: "新增成功" })
         closeDialog()
         await loadBooks(1, query)
@@ -369,7 +419,7 @@ export function BookManagement() {
         throw new Error("Missing editing book id")
       }
 
-      await updateAdminBook(token, editingBookId, payload)
+      await updateAdminBook(editingBookId, payload)
       toast({ title: "保存成功" })
       closeDialog()
       await loadBooks(bookPage.pageNum, query)
@@ -386,30 +436,37 @@ export function BookManagement() {
   }
 
   useEffect(() => {
-    if (!hydrated && !token) {
-      return
-    }
-
     if (!token) {
+      if (!hydrated) {
+        return
+      }
+
       router.replace("/login")
       return
     }
 
-    void loadCategories()
-    void loadBooks(1, query)
-  }, [hydrated, loadBooks, loadCategories, router, token])
+    const timer = window.setTimeout(() => {
+      void loadCategories()
+      void loadBooks(1, { title: "", author: "", categoryId: "" })
+    }, 0)
+
+    // loadCategories / loadBooks are intentionally omitted — we only want this
+    // effect to fire when auth resolves or the admin sidebar explicitly refreshes this tab.
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, token, refreshKey])
 
   return (
     <div className="space-y-6">
       <Card className="bg-card">
         <CardHeader>
           <CardTitle className="text-lg">图书搜索</CardTitle>
-          <CardDescription>按书名、作者或分类 ID 进行检索。</CardDescription>
+          <CardDescription>按书名、作者或分类进行检索。</CardDescription>
         </CardHeader>
         <CardContent>
           <form
             onSubmit={handleSearch}
-            className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_minmax(180px,1fr)_auto]"
+            className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_minmax(220px,1fr)_auto]"
           >
             <div className="space-y-2">
               <Label htmlFor="book-title-search">书名</Label>
@@ -435,14 +492,26 @@ export function BookManagement() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="book-category-search">分类 ID</Label>
-              <Input
-                id="book-category-search"
-                value={bookSearch.categoryId}
-                onChange={(event) => setBookSearch((current) => ({ ...current, categoryId: event.target.value }))}
-                placeholder="请输入分类 ID"
-                className="bg-secondary"
-              />
+              <Label>分类</Label>
+              <Select
+                value={bookSearch.categoryId || "all"}
+                onValueChange={(value) => setBookSearch((current) => ({
+                  ...current,
+                  categoryId: value === "all" ? "" : value,
+                }))}
+              >
+                <SelectTrigger className="w-full bg-secondary">
+                  <SelectValue placeholder={categoryLoading ? "正在加载分类..." : "请选择分类"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部分类</SelectItem>
+                  {categories.map((category) => (
+                    <SelectItem key={category.categoryId} value={String(category.categoryId)}>
+                      {category.categoryName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-end gap-2">
               <Button type="submit" className="w-full md:w-auto">
@@ -489,12 +558,12 @@ export function BookManagement() {
                 <Table className="table-auto">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="min-w-[170px]">ISBN</TableHead>
+                      <TableHead className="min-w-[170px] text-center">ISBN</TableHead>
                       <TableHead className="min-w-[220px]">书名</TableHead>
                       <TableHead className="min-w-[180px]">作者</TableHead>
                       <TableHead className="min-w-[140px]">分类</TableHead>
                       <TableHead className="min-w-[120px]">库存</TableHead>
-                      <TableHead className="min-w-[140px] text-right">操作</TableHead>
+                      <TableHead className="min-w-[180px] text-center">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -512,32 +581,21 @@ export function BookManagement() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <div className="flex justify-end gap-2">
+                          <div className="flex gap-2">
                             <Button variant="outline" size="sm" className="h-8" onClick={() => void openEditDialog(book)}>
                               <Pencil className="mr-1.5 h-3.5 w-3.5" />
                               编辑
                             </Button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => void openEditDialog(book)}>
-                                  <Pencil className="mr-2 h-4 w-4" />
-                                  编辑
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="text-destructive"
-                                  disabled={actionBookId === book.bookId}
-                                  onClick={() => void handleDelete(book)}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  删除
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-destructive hover:text-destructive"
+                              disabled={actionBookId === book.bookId}
+                              onClick={() => void handleDelete(book)}
+                            >
+                              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                              删除
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -676,14 +734,69 @@ export function BookManagement() {
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="book-cover-url">封面地址</Label>
-                      <Input
-                        id="book-cover-url"
-                        value={bookForm.coverUrl}
-                        onChange={(event) => setBookForm((current) => ({ ...current, coverUrl: event.target.value }))}
-                        placeholder="请输入封面图片 URL"
-                        className="bg-secondary border-border"
-                      />
+                      <Label>图书封面</Label>
+                      <div className="flex flex-col gap-4 rounded-lg border border-border bg-secondary/30 p-4 sm:flex-row sm:items-start">
+                        <label
+                          htmlFor="book-cover-upload"
+                          className="relative flex h-44 w-32 shrink-0 cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background/40 transition-colors hover:border-primary/60 hover:bg-secondary"
+                        >
+                          {bookForm.coverUrl ? (
+                            <>
+                              <img
+                                src={bookForm.coverUrl}
+                                alt={bookForm.title || "图书封面"}
+                                className="h-full w-full object-cover"
+                              />
+                              <span className="absolute inset-0 flex items-center justify-center bg-black/60 text-sm text-white opacity-0 transition-opacity hover:opacity-100">
+                                更换封面
+                              </span>
+                            </>
+                          ) : (
+                            <span className="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
+                              <ImagePlus className="mb-2 h-8 w-8" />
+                              <span className="text-xs">上传封面</span>
+                            </span>
+                          )}
+                          <input
+                            id="book-cover-upload"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            disabled={coverUploading || submitting}
+                            onChange={(event) => {
+                              void handleCoverFileChange(event)
+                            }}
+                          />
+                        </label>
+                        <div className="min-w-0 flex-1 space-y-3 text-sm">
+                          <div>
+                            <p className="font-medium">{coverUploading ? "正在上传封面..." : "支持 JPG、PNG、WEBP 格式"}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">单文件最大 5MB，上传成功后会自动写入图书封面地址。</p>
+                          </div>
+                          {coverFileName && (
+                            <p className="truncate text-xs text-muted-foreground">已选择：{coverFileName}</p>
+                          )}
+                          {bookForm.coverUrl && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="secondary" className="max-w-full truncate">
+                                已上传封面
+                              </Badge>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setBookForm((current) => ({ ...current, coverUrl: "" }))
+                                  setCoverFileName("")
+                                }}
+                              >
+                                <X className="mr-1.5 h-3.5 w-3.5" />
+                                移除
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="book-isbn">ISBN</Label>
@@ -785,22 +898,6 @@ export function BookManagement() {
                       rows={5}
                     />
                   </div>
-
-                  {bookForm.coverUrl && (
-                    <div className="overflow-hidden rounded-lg border border-border bg-secondary/30">
-                      <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-medium">
-                        <BookOpen className="h-4 w-4 text-primary" />
-                        封面预览
-                      </div>
-                      <div className="p-4">
-                        <img
-                          src={bookForm.coverUrl}
-                          alt={bookForm.title || "图书封面"}
-                          className="h-56 w-40 rounded-md object-cover"
-                        />
-                      </div>
-                    </div>
-                  )}
                 </>
               )}
 
@@ -808,7 +905,7 @@ export function BookManagement() {
                 <Button type="button" variant="outline" onClick={closeDialog} disabled={submitting}>
                   取消
                 </Button>
-                <Button type="submit" disabled={submitting || dialogLoading || categoryLoading}>
+                <Button type="submit" disabled={submitting || dialogLoading || categoryLoading || coverUploading}>
                   {submitting ? "处理中..." : mode === "create" ? "确认添加" : "保存"}
                 </Button>
               </DialogFooter>

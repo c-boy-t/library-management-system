@@ -3,6 +3,7 @@ import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { buildBooksPageHref } from "@/lib/book-discovery"
 
 const categories = [
   { code: "A", name: "马克思主义、列宁主义、毛泽东思想、邓小平理论", count: 156 },
@@ -49,7 +50,7 @@ export default function CategoriesPage() {
           {/* Categories Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {categories.map((category) => (
-              <Link key={category.code} href={`/books?category=${category.code}`}>
+              <Link key={category.code} href={buildBooksPageHref({ category: category.name })}>
                 <Card className="bg-card hover:border-primary/50 transition-all hover:shadow-lg hover:shadow-primary/5 h-full">
                   <CardContent className="p-6">
                     <div className="flex items-start gap-4">

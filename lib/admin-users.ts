@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { buildAuthHeaders, requestJson } from '@/lib/api'
+import { requestJson } from '@/lib/api'
 
 const numericStatusSchema = z.union([z.number(), z.string()]).transform((value) => Number(value))
 
@@ -36,11 +36,11 @@ export interface FetchAdminUsersParams {
   status?: number
 }
 
-export async function fetchAdminUsers(token: string, params: FetchAdminUsersParams) {
+export async function fetchAdminUsers(params: FetchAdminUsersParams) {
   const search = new URLSearchParams({
     page: String(params.page),
     size: String(params.size),
-    sort: 'lastOperationTime,desc',
+    sort: 'updateTime,desc',
   })
 
   if (params.realName?.trim()) {
@@ -53,26 +53,22 @@ export async function fetchAdminUsers(token: string, params: FetchAdminUsersPara
 
   return requestJson(`/api/v1/admin/users?${search.toString()}`, {
     method: 'GET',
-    headers: buildAuthHeaders(token, false),
   }, adminUserPageSchema)
 }
 
-export async function updateAdminUserStatus(token: string, userId: number, status: number) {
+export async function updateAdminUserStatus(userId: number, status: number) {
   return requestJson(`/api/v1/admin/users/${userId}/status`, {
     method: 'PUT',
-    headers: buildAuthHeaders(token),
     body: JSON.stringify({ status }),
   }, adminUserSchema)
 }
 
 export async function resetAdminUserPassword(
-  token: string,
   userId: number,
   payload: { newPassword: string; confirmPassword: string },
 ) {
   return requestJson(`/api/v1/admin/users/${userId}/reset-password`, {
     method: 'PUT',
-    headers: buildAuthHeaders(token),
     body: JSON.stringify(payload),
   }, adminUserSchema)
 }
